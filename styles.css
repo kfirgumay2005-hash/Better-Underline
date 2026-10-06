@@ -1,7 +1,6 @@
 .ou-underline {
-	text-decoration: underline;
-	text-underline-offset: 2px;
-	text-decoration-thickness: var(--ou-underline-thickness, 1px);
+	text-decoration: none;
+	border-bottom: var(--ou-underline-thickness, 1px) solid currentColor;
 }
 
 .ou-spoiler {
@@ -15,8 +14,8 @@
 		color 0.15s ease;
 }
 
-.ou-spoiler:not(.is-revealed) * {
-	color: transparent !important;
+body .ou-spoiler.ou-spoiler:not(.is-revealed) * {
+	color: transparent;
 }
 
 .ou-spoiler.is-revealed {
@@ -29,8 +28,8 @@ body.ou-spoiler-hover .ou-spoiler:hover {
 	color: inherit;
 }
 
-body.ou-spoiler-hover .ou-spoiler:hover * {
-	color: inherit !important;
+body.ou-spoiler-hover .ou-spoiler.ou-spoiler:not(.is-revealed):hover * {
+	color: inherit;
 }
 
 .ou-delim {
