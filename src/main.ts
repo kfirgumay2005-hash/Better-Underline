@@ -19,46 +19,11 @@ import {
 interface Rule {
 	delim: string;
 	cls: string;
-	tag: string;
+	tag: 'span' | 'u';
 	strict: boolean;
 	spoiler: boolean;
 	skipTables: boolean;
 }
-
-const STYLE_ID = 'underline-spoiler-styles';
-
-const CSS = `
-.ou-underline {
-	text-decoration: underline;
-	text-underline-offset: 2px;
-	text-decoration-thickness: var(--ou-underline-thickness, 1px);
-}
-.ou-spoiler {
-	background-color: var(--text-normal);
-	color: transparent;
-	border-radius: 4px;
-	padding: 0 2px;
-	cursor: pointer;
-	transition: background-color 0.15s ease, color 0.15s ease;
-}
-.ou-spoiler:not(.is-revealed) * {
-	color: transparent !important;
-}
-.ou-spoiler.is-revealed {
-	background-color: var(--background-modifier-hover);
-	color: inherit;
-}
-body.ou-spoiler-hover .ou-spoiler:hover {
-	background-color: var(--background-modifier-hover);
-	color: inherit;
-}
-body.ou-spoiler-hover .ou-spoiler:hover * {
-	color: inherit !important;
-}
-.ou-delim {
-	opacity: 0.45;
-}
-`;
 
 function isWordChar(ch: string | undefined): boolean {
 	return ch !== undefined && /[\p{L}\p{N}_]/u.test(ch);
@@ -189,8 +154,7 @@ function applyDomMatches(matches: DomMatch[], rule: Rule): void {
 		range.setStart(open.node, open.idx);
 		range.setEnd(close.node, endIdx);
 
-		const wrapper = document.createElement(rule.tag);
-		wrapper.className = rule.cls;
+		const wrapper = createEl(rule.tag, { cls: rule.cls });
 		if (rule.spoiler) {
 			wrapper.addEventListener('click', () =>
 				wrapper.classList.toggle('is-revealed'),
@@ -318,12 +282,6 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		const styleEl = document.createElement('style');
-		styleEl.id = STYLE_ID;
-		styleEl.textContent = CSS;
-		document.head.appendChild(styleEl);
-		this.register(() => styleEl.remove());
-
 		this.registerMarkdownPostProcessor((el) => {
 			for (const rule of this.getRules()) {
 				processContainer(el, rule);
@@ -376,11 +334,9 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData(),
-		);
+		const data =
+			(await this.loadData()) as Partial<UnderlineSpoilerSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
 	}
 
 	async saveSettings() {

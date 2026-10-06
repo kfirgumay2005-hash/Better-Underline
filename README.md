@@ -4,9 +4,11 @@ An Obsidian plugin that adds quick underline and spoiler formatting using simple
 
 ## Installation
 
+Requires Obsidian 1.13.0 or later.
+
 **Manual**
 
-1. Download `main.js` and `manifest.json` from the latest release.
+1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release.
 2. Create a folder named `Better-Underline` inside your vault at `.obsidian/plugins/`.
 3. Copy the downloaded files into that folder.
 4. Restart Obsidian (or reload plugins), then enable **Better-Underline** under _Settings → Community plugins_.
@@ -20,7 +22,7 @@ npm install
 npm run build
 ```
 
-Then copy `main.js` and `manifest.json` into `<your-vault>/.obsidian/plugins/Better-Underline/`.
+Then copy `main.js`, `manifest.json`, and `styles.css` into `<your-vault>/.obsidian/plugins/Better-Underline/`.
 
 ## Features
 

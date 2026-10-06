@@ -1,4 +1,5 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, PluginSettingTab } from 'obsidian';
+import type { SettingDefinitionItem } from 'obsidian';
 import type UnderlineSpoilerPlugin from './main';
 
 export const SPOILER_DELIMITER = '||';
@@ -36,7 +37,7 @@ export function validateDelimiter(value: string): string | null {
 	}
 	for (const ch of value) {
 		if (RESERVED_CHARS.has(ch)) {
-			return `The character ${ch} is already used by existing Markdown / Obsidian syntax. Choose a different marker.`;
+			return `The character ${ch} is already used by Markdown or Obsidian syntax. Choose a different marker.`;
 		}
 	}
 	return null;
@@ -56,130 +57,102 @@ export class UnderlineSpoilerSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		const s = this.plugin.settings;
-		containerEl.empty();
+	getControlValue(key: string): unknown {
+		return (this.plugin.settings as unknown as Record<string, unknown>)[
+			key
+		];
+	}
 
-		new Setting(containerEl).setName('Underline').setHeading();
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		(this.plugin.settings as unknown as Record<string, unknown>)[key] =
+			value;
+		await this.plugin.saveSettings();
+	}
 
-		new Setting(containerEl)
-			.setName('Enable underline')
-			.setDesc(
-				'Instead of writing <u>text</u>, wrap the text with the marker chosen below.',
-			)
-			.addToggle((t) =>
-				t.setValue(s.underlineEnabled).onChange(async (v) => {
-					s.underlineEnabled = v;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName('Underline thickness')
-			.setDesc('Thickness of the underline line in pixels.')
-			.addSlider((sl) =>
-				sl
-					.setLimits(0.5, 6, 0.5)
-					.setValue(s.underlineThickness)
-					.setDynamicTooltip()
-					.onChange(async (v) => {
-						s.underlineThickness = v;
-						await this.plugin.saveSettings();
-					}),
-			)
-			.addExtraButton((b) =>
-				b
-					.setIcon('reset')
-					.setTooltip('Reset to default')
-					.onClick(async () => {
-						s.underlineThickness =
-							DEFAULT_SETTINGS.underlineThickness;
-						await this.plugin.saveSettings();
-						this.display();
-					}),
-			);
-
-		const previewSetting = new Setting(containerEl).setName('Preview');
-		const updatePreview = () => {
-			const d = resolveUnderlineDelimiter(s);
-			previewSetting.setDesc(`${d}text${d}`);
-		};
-
-		new Setting(containerEl)
-			.setName('Underline marker')
-			.setDesc('Choose a built-in marker or define your own.')
-			.addDropdown((dd) => {
-				for (const p of UNDERLINE_PRESETS) {
-					dd.addOption(p, `${p}text${p}`);
-				}
-				dd.addOption('custom', 'Custom');
-				dd.setValue(s.underlinePreset).onChange(async (v) => {
-					s.underlinePreset = v as UnderlinePreset;
-					await this.plugin.saveSettings();
-					this.display();
-				});
-			});
-
-		if (s.underlinePreset === 'custom') {
-			const customSetting = new Setting(containerEl)
-				.setName('Custom marker')
-				.setDesc(
-					'2-3 characters, no letters / digits / spaces, and no characters already used by Markdown syntax.',
-				);
-			const warnEl = containerEl.createDiv({
-				cls: 'setting-item-description mod-warning',
-			});
-
-			customSetting.addText((t) =>
-				t
-					.setPlaceholder('+=')
-					.setValue(s.underlineCustom)
-					.onChange(async (v) => {
-						const err = validateDelimiter(v);
-						warnEl.setText(err ?? '');
-						if (err) return;
-						s.underlineCustom = v;
-						await this.plugin.saveSettings();
-						updatePreview();
-					}),
-			);
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		const presetOptions: Record<string, string> = {};
+		for (const p of UNDERLINE_PRESETS) {
+			presetOptions[p] = `${p}text${p}`;
 		}
-		updatePreview();
+		presetOptions.custom = 'Custom';
 
-		new Setting(containerEl).setName('Spoiler').setHeading();
+		const underlineOn = () => this.plugin.settings.underlineEnabled;
 
-		new Setting(containerEl)
-			.setName('Enable spoiler')
-			.setDesc(
-				`Writing ${SPOILER_DELIMITER}text${SPOILER_DELIMITER} hides the text until it is clicked. Spoilers are disabled inside tables because | is reserved there for column separation.`,
-			)
-			.addToggle((t) =>
-				t.setValue(s.spoilerEnabled).onChange(async (v) => {
-					s.spoilerEnabled = v;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName('Reveal on mouse hover')
-			.setDesc(
-				'Desktop only: reveal the spoiler when hovering with the mouse, not only on click.',
-			)
-			.addToggle((t) =>
-				t.setValue(s.spoilerRevealOnHover).onChange(async (v) => {
-					s.spoilerRevealOnHover = v;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl).setName('Conflict prevention').setHeading();
-		containerEl.createEl('p', {
-			cls: 'setting-item-description',
-			text:
-				'Markers are not applied inside code blocks, inline code, math, or comments. ' +
-				'An opening underline marker must follow a space, line start, or punctuation, and the text cannot start or end with a space, ' +
-				'so i++ or C++ are not turned into underlines by mistake.',
-		});
+		return [
+			{
+				name: 'Enable underline',
+				desc: 'Wrap text with a marker instead of writing <u> tags.',
+				control: { type: 'toggle', key: 'underlineEnabled' },
+			},
+			{
+				name: 'Underline marker',
+				desc: 'Choose a built-in marker or define your own.',
+				visible: underlineOn,
+				control: {
+					type: 'dropdown',
+					key: 'underlinePreset',
+					defaultValue: DEFAULT_SETTINGS.underlinePreset,
+					options: presetOptions,
+				},
+			},
+			{
+				name: 'Custom marker',
+				desc: '2-3 characters, no letters, digits, spaces, or Markdown syntax characters.',
+				visible: () =>
+					this.plugin.settings.underlineEnabled &&
+					this.plugin.settings.underlinePreset === 'custom',
+				control: {
+					type: 'text',
+					key: 'underlineCustom',
+					placeholder: '+=',
+					defaultValue: DEFAULT_SETTINGS.underlineCustom,
+					validate: (value: string) =>
+						validateDelimiter(value) ?? undefined,
+				},
+			},
+			{
+				name: 'Underline thickness',
+				desc: 'Thickness of the underline in pixels.',
+				visible: underlineOn,
+				control: {
+					type: 'slider',
+					key: 'underlineThickness',
+					min: 0.5,
+					max: 6,
+					step: 0.5,
+					defaultValue: DEFAULT_SETTINGS.underlineThickness,
+				},
+			},
+			{
+				type: 'group',
+				heading: 'Spoiler',
+				items: [
+					{
+						name: 'Enable spoiler',
+						desc: `Text wrapped in ${SPOILER_DELIMITER} is hidden until clicked. Not applied inside tables.`,
+						control: { type: 'toggle', key: 'spoilerEnabled' },
+					},
+					{
+						name: 'Reveal on mouse hover',
+						desc: 'Desktop only: also reveal spoilers on hover.',
+						visible: () => this.plugin.settings.spoilerEnabled,
+						control: {
+							type: 'toggle',
+							key: 'spoilerRevealOnHover',
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Conflict prevention',
+				items: [
+					{
+						name: 'Where markers are ignored',
+						desc: 'Code, math, and comments are skipped. Underline markers must touch the text, so i++ and C++ stay unchanged.',
+					},
+				],
+			},
+		];
 	}
 }

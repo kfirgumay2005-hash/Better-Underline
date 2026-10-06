@@ -1,8 +1,38 @@
-/*
+.ou-underline {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	text-decoration-thickness: var(--ou-underline-thickness, 1px);
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.ou-spoiler {
+	background-color: var(--text-normal);
+	color: transparent;
+	border-radius: 4px;
+	padding: 0 2px;
+	cursor: pointer;
+	transition:
+		background-color 0.15s ease,
+		color 0.15s ease;
+}
 
-If your plugin does not need CSS, delete this file.
+.ou-spoiler:not(.is-revealed) * {
+	color: transparent !important;
+}
 
-*/
+.ou-spoiler.is-revealed {
+	background-color: var(--background-modifier-hover);
+	color: inherit;
+}
+
+body.ou-spoiler-hover .ou-spoiler:hover {
+	background-color: var(--background-modifier-hover);
+	color: inherit;
+}
+
+body.ou-spoiler-hover .ou-spoiler:hover * {
+	color: inherit !important;
+}
+
+.ou-delim {
+	opacity: 0.45;
+}
