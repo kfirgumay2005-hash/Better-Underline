@@ -480,7 +480,7 @@ export class UnderlineSpoilerSettingTab extends PluginSettingTab {
 						{
 							name: 'Preview',
 							render: (setting) => {
-								const el = setting.controlEl.createEl('span', {
+								const el = setting.controlEl.createSpan({
 									text: 'Sample text',
 									cls: underline
 										? 'ou-underline'
