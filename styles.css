@@ -75,50 +75,50 @@ body.ou-custom-bold .markdown-source-view.mod-cm6 .cm-strong {
    Image alignment, active when "Image alignment" is on.
    1. Default: all images are centered
    ========================================== */
-body.ou-image-align .image-embed,
-body.ou-image-align .cm-content .image-embed,
-body.ou-image-align
+body.ou-image-align.ou-image-align .image-embed,
+body.ou-image-align.ou-image-align .cm-content .image-embed,
+body.ou-image-align.ou-image-align
 	.markdown-source-view.mod-cm6
 	.cm-contentContainer.cm-contentContainer
 	.cm-content
 	.image-embed,
-body.ou-image-align .markdown-rendered img {
-	display: block !important;
-	margin-left: auto !important;
-	margin-right: auto !important;
-	width: fit-content !important;
+body.ou-image-align.ou-image-align .markdown-rendered img {
+	display: block;
+	margin-left: auto;
+	margin-right: auto;
+	width: fit-content;
 }
 
 /* ==========================================
    2. Exception: align left (#left)
    ========================================== */
-body.ou-image-align img[src*='#left'],
-body.ou-image-align span[src*='#left'],
-body.ou-image-align div[src*='#left'],
-body.ou-image-align .image-embed[src*='#left'],
-body.ou-image-align .cm-content .image-embed[src*='#left'],
-body.ou-image-align
+body.ou-image-align.ou-image-align img[src*='#left'],
+body.ou-image-align.ou-image-align span[src*='#left'],
+body.ou-image-align.ou-image-align div[src*='#left'],
+body.ou-image-align.ou-image-align .image-embed[src*='#left'],
+body.ou-image-align.ou-image-align .cm-content .image-embed[src*='#left'],
+body.ou-image-align.ou-image-align
 	.markdown-source-view.mod-cm6
 	.cm-contentContainer.cm-contentContainer
 	.cm-content
 	.image-embed[src*='#left'] {
-	margin-left: 0 !important;
-	margin-right: auto !important;
+	margin-left: 0;
+	margin-right: auto;
 }
 
 /* ==========================================
    3. Exception: align right (#right)
    ========================================== */
-body.ou-image-align img[src*='#right'],
-body.ou-image-align span[src*='#right'],
-body.ou-image-align div[src*='#right'],
-body.ou-image-align .image-embed[src*='#right'],
-body.ou-image-align .cm-content .image-embed[src*='#right'],
-body.ou-image-align
+body.ou-image-align.ou-image-align img[src*='#right'],
+body.ou-image-align.ou-image-align span[src*='#right'],
+body.ou-image-align.ou-image-align div[src*='#right'],
+body.ou-image-align.ou-image-align .image-embed[src*='#right'],
+body.ou-image-align.ou-image-align .cm-content .image-embed[src*='#right'],
+body.ou-image-align.ou-image-align
 	.markdown-source-view.mod-cm6
 	.cm-contentContainer.cm-contentContainer
 	.cm-content
 	.image-embed[src*='#right'] {
-	margin-left: auto !important;
-	margin-right: 0 !important;
+	margin-left: auto;
+	margin-right: 0;
 }
