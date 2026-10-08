@@ -16,7 +16,7 @@ Underline, highlighter and spoiler formatting for Obsidian using simple text mar
 - **Image alignment:** images are centered; add `#left` or `#right` to the link (`![[photo.png#left]]`) to align one to a side.
 - **Spoilers:** click to reveal, with optional reveal on hover (desktop).
 - **Works everywhere:** Reading mode, Live Preview, and Source mode.
-- **Commands:** toggle underline, highlighter, spoiler, or any preset around the selected text. Bind them to hotkeys or a mobile toolbar.
+- **Commands:** toggle underline, highlighter, spoiler, or any preset with one tap. With no selection the word under the cursor is wrapped, and existing markers are found and removed automatically. Bind them to hotkeys or the mobile toolbar.
 - **Safe by design:** markers are ignored in code, math, and comments. Markers must touch the text, so `i++` and `C++` are unaffected. Spoilers are disabled in tables.
 - **Marker validation:** 2-3 characters, no letters, digits, spaces, or Markdown syntax characters, and no overlap with other presets.
 

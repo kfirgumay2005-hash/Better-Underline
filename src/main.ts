@@ -336,6 +336,11 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	private appliedVars = new Set<string>();
 
 	async onload() {
+		// Commands are registered first and synchronously, before any `await`,
+		// so they already exist when Obsidian resolves the mobile toolbar.
+		// They read the settings lazily, only when they run.
+		this.registerCommands();
+
 		await this.loadSettings();
 
 		this.registerMarkdownPostProcessor((el) => {
@@ -347,26 +352,31 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		this.editorExtensions.push(buildEditorExtension(this));
 		this.registerEditorExtension(this.editorExtensions);
 
+		this.addSettingTab(new UnderlineSpoilerSettingTab(this.app, this));
+		this.applyStyles();
+	}
+
+	private registerCommands() {
 		this.addCommand({
 			id: 'toggle-underline',
 			name: 'Underline: toggle markers around selected text',
-			editorCheckCallback: (checking, editor) => {
+			icon: 'underline',
+			editorCallback: (editor) => {
 				const preset = this.firstPreset('underline');
 				if (!preset) {
-					if (!checking)
-						new Notice(
-							'No enabled underline preset. Add one in the plugin settings.',
-						);
-					return false;
+					new Notice(
+						'No enabled underline preset. Add one in the plugin settings.',
+					);
+					return;
 				}
-				if (!checking) this.toggleWrap(editor, preset.delimiter);
-				return true;
+				this.toggleWrap(editor, preset.delimiter);
 			},
 		});
 
 		this.addCommand({
 			id: 'toggle-highlight',
 			name: 'Highlighter: toggle markers around selected text',
+			icon: 'highlighter',
 			editorCallback: (editor) => {
 				// First enabled highlighter preset, or the built-in == when there is none.
 				const preset = this.firstPreset('highlight');
@@ -377,6 +387,7 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		this.addCommand({
 			id: 'toggle-preset',
 			name: 'Style: choose a preset and toggle its markers',
+			icon: 'palette',
 			editorCallback: (editor) => {
 				const presets = this.settings.presets.filter(
 					(p) => p.enabled && validateDelimiter(p.delimiter) === null,
@@ -396,21 +407,15 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		this.addCommand({
 			id: 'toggle-spoiler',
 			name: 'Spoiler: toggle markers around selected text',
-			editorCheckCallback: (checking, editor) => {
+			icon: 'eye-off',
+			editorCallback: (editor) => {
 				if (!this.settings.spoilerEnabled) {
-					if (!checking)
-						new Notice(
-							'Spoiler is disabled in the plugin settings.',
-						);
-					return false;
+					new Notice('Spoiler is disabled in the plugin settings.');
+					return;
 				}
-				if (!checking) this.toggleWrap(editor, SPOILER_DELIMITER);
-				return true;
+				this.toggleWrap(editor, SPOILER_DELIMITER);
 			},
 		});
-
-		this.addSettingTab(new UnderlineSpoilerSettingTab(this.app, this));
-		this.applyStyles();
 	}
 
 	onunload() {
@@ -538,22 +543,142 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 			editor.replaceSelection(d + sel + d);
 			return;
 		}
+
 		const cur = editor.getCursor();
+		const line = editor.getLine(cur.line);
+
+		// No selection: wrap the word under the cursor, if there is one.
+		let start = cur.ch;
+		let end = cur.ch;
+		while (start > 0 && isWordChar(line[start - 1])) start--;
+		while (end < line.length && isWordChar(line[end])) end++;
+		if (end > start) {
+			editor.replaceRange(
+				d + line.slice(start, end) + d,
+				{ line: cur.line, ch: start },
+				{ line: cur.line, ch: end },
+			);
+			editor.setCursor({ line: cur.line, ch: cur.ch + d.length });
+			return;
+		}
+
 		editor.replaceRange(d + d, cur);
 		editor.setCursor({ line: cur.line, ch: cur.ch + d.length });
 	}
 
+	private unwrapPair(
+		editor: Editor,
+		line: number,
+		pair: { open: number; close: number },
+		len: number,
+		fromCh: number,
+		toCh: number,
+		hasSelection: boolean,
+	) {
+		const adj = (ch: number): number => {
+			let c = ch;
+			if (c >= pair.close + len) c -= len;
+			else if (c > pair.close) c = pair.close;
+			if (c >= pair.open + len) c -= len;
+			else if (c > pair.open) c = pair.open;
+			return c;
+		};
+
+		editor.replaceRange(
+			'',
+			{ line, ch: pair.close },
+			{ line, ch: pair.close + len },
+		);
+		editor.replaceRange(
+			'',
+			{ line, ch: pair.open },
+			{ line, ch: pair.open + len },
+		);
+
+		if (hasSelection) {
+			editor.setSelection(
+				{ line, ch: adj(fromCh) },
+				{ line, ch: adj(toCh) },
+			);
+		} else {
+			editor.setCursor({ line, ch: adj(fromCh) });
+		}
+	}
+
+	/**
+	 * Adds markers, or removes them when they are already there. The markers
+	 * are found on their own: the cursor can be anywhere inside the marked
+	 * text, or the selection can cover just the text (markers not selected).
+	 */
 	private toggleWrap(editor: Editor, d: string) {
+		const len = d.length;
+		const from = editor.getCursor('from');
+		const to = editor.getCursor('to');
+		const hasSelection = from.line !== to.line || from.ch !== to.ch;
 		const sel = editor.getSelection();
 
+		// 1. The selection itself includes the markers.
 		if (
-			sel.length >= d.length * 2 &&
+			hasSelection &&
+			sel.length >= len * 2 &&
 			sel.startsWith(d) &&
 			sel.endsWith(d)
 		) {
-			editor.replaceSelection(sel.slice(d.length, sel.length - d.length));
+			editor.replaceSelection(sel.slice(len, sel.length - len));
 			return;
 		}
+
+		// 2. The cursor or selection is inside a marked span on the same line.
+		if (from.line === to.line) {
+			const rule: Rule = {
+				delim: d,
+				cls: '',
+				vars: {},
+				style: '',
+				tag: 'span',
+				strict: d !== SPOILER_DELIMITER && d !== '==',
+				spoiler: false,
+				skipTables: false,
+			};
+			const pair = scanLine(editor.getLine(from.line), rule).find(
+				(m) => from.ch >= m.open && to.ch <= m.close + len,
+			);
+			if (pair) {
+				this.unwrapPair(
+					editor,
+					from.line,
+					pair,
+					len,
+					from.ch,
+					to.ch,
+					hasSelection,
+				);
+				return;
+			}
+		}
+
+		// 3. Markers touch the selection from outside (also across lines).
+		if (hasSelection) {
+			const beforeStart = {
+				line: from.line,
+				ch: Math.max(0, from.ch - len),
+			};
+			const afterEnd = { line: to.line, ch: to.ch + len };
+			if (
+				editor.getRange(beforeStart, from) === d &&
+				editor.getRange(to, afterEnd) === d
+			) {
+				editor.replaceRange('', to, afterEnd);
+				editor.replaceRange('', beforeStart, from);
+				editor.setSelection(beforeStart, {
+					line: to.line,
+					ch: to.line === from.line ? to.ch - len : to.ch,
+				});
+				return;
+			}
+		}
+
+		// 4. Nothing to remove: add markers.
 		this.wrapSelection(editor, d);
 	}
 }
