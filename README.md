@@ -1,28 +1,11 @@
 # Better-Underline
 
-An Obsidian plugin that adds quick underline and spoiler formatting using simple text markers, instead of typing `<u>text</u>`.
+An Obsidian plugin that enable customization of underline , highlight and spoiler formatting using simple text markers, instead of typing `<u>text</u>`.
 
 ## Installation
 
 Requires Obsidian 1.13.0 or later.
-
-**Manual**
-
-1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release.
-2. Create a folder named `Better-Underline` inside your vault at `.obsidian/plugins/`.
-3. Copy the downloaded files into that folder.
-4. Restart Obsidian (or reload plugins), then enable **Better-Underline** under _Settings → Community plugins_.
-
-**From source**
-
-```bash
-git clone <repository-url>
-cd Better-Underline
-npm install
-npm run build
-```
-
-Then copy `main.js`, `manifest.json`, and `styles.css` into `<your-vault>/.obsidian/plugins/Better-Underline/`.
+Install from obsidian commiunity plugins.
 
 ## Features
 
@@ -33,3 +16,4 @@ Then copy `main.js`, `manifest.json`, and `styles.css` into `<your-vault>/.obsid
 - **Commands:** toggle underline or spoiler markers around the selected text, so you can bind them to hotkeys or use them from a mobile toolbar.
 - **Safe by design:** markers are ignored inside code blocks, inline code, math, and comments. Underline markers must be attached to the text, so `i++` or `C++` are not affected. Spoilers are disabled inside tables, where `|` separates columns.
 - **Custom marker validation:** custom markers must be 2-3 characters and cannot use characters that already have meaning in Markdown or Obsidian.
+- **Highlight and underline customization:** save presets of your favorites highlights and underlines.

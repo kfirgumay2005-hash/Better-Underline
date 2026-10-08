@@ -1,4 +1,11 @@
-import { Editor, MarkdownView, Notice, Plugin } from 'obsidian';
+import {
+	App,
+	Editor,
+	FuzzySuggestModal,
+	MarkdownView,
+	Notice,
+	Plugin,
+} from 'obsidian';
 import {
 	Decoration,
 	DecorationSet,
@@ -9,15 +16,20 @@ import {
 import { Extension, Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import {
-	DEFAULT_SETTINGS,
+	PresetKind,
 	SPOILER_DELIMITER,
+	StylePreset,
 	UnderlineSpoilerSettings,
 	UnderlineSpoilerSettingTab,
-	resolveUnderlineDelimiter,
+	buildPresetCss,
+	createDefaultSettings,
+	normalizeSettings,
+	validateDelimiter,
 } from './settings';
 
 interface Rule {
 	delim: string;
+	/** One or more space-separated class names. */
 	cls: string;
 	tag: 'span' | 'u';
 	strict: boolean;
@@ -154,7 +166,7 @@ function applyDomMatches(matches: DomMatch[], rule: Rule): void {
 		range.setStart(open.node, open.idx);
 		range.setEnd(close.node, endIdx);
 
-		const wrapper = createEl(rule.tag, { cls: rule.cls });
+		const wrapper = createEl(rule.tag, { cls: rule.cls.split(' ') });
 		if (rule.spoiler) {
 			wrapper.addEventListener('click', () =>
 				wrapper.classList.toggle('is-revealed'),
@@ -275,9 +287,38 @@ function buildEditorExtension(plugin: UnderlineSpoilerPlugin): Extension {
 	);
 }
 
+class PresetSuggestModal extends FuzzySuggestModal<StylePreset> {
+	private presets: StylePreset[];
+	private onChoose: (preset: StylePreset) => void;
+
+	constructor(
+		app: App,
+		presets: StylePreset[],
+		onChoose: (preset: StylePreset) => void,
+	) {
+		super(app);
+		this.presets = presets;
+		this.onChoose = onChoose;
+		this.setPlaceholder('Choose a style preset');
+	}
+
+	getItems(): StylePreset[] {
+		return this.presets;
+	}
+
+	getItemText(p: StylePreset): string {
+		return `${p.name}  ${p.delimiter}text${p.delimiter}`;
+	}
+
+	onChooseItem(p: StylePreset): void {
+		this.onChoose(p);
+	}
+}
+
 export default class UnderlineSpoilerPlugin extends Plugin {
-	settings: UnderlineSpoilerSettings = { ...DEFAULT_SETTINGS };
+	settings: UnderlineSpoilerSettings = createDefaultSettings();
 	private editorExtensions: Extension[] = [];
+	private styleEl: HTMLStyleElement | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -295,16 +336,46 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 			id: 'toggle-underline',
 			name: 'Underline: toggle markers around selected text',
 			editorCheckCallback: (checking, editor) => {
-				if (!this.settings.underlineEnabled) {
+				const preset = this.firstPreset('underline');
+				if (!preset) {
 					if (!checking)
 						new Notice(
-							'Underline is disabled in the plugin settings.',
+							'No enabled underline preset. Add one in the plugin settings.',
 						);
 					return false;
 				}
-				if (!checking)
-					this.toggleWrap(editor, this.getUnderlineDelimiter());
+				if (!checking) this.toggleWrap(editor, preset.delimiter);
 				return true;
+			},
+		});
+
+		this.addCommand({
+			id: 'toggle-highlight',
+			name: 'Highlighter: toggle markers around selected text',
+			editorCallback: (editor) => {
+				// Uses the first enabled highlighter preset,
+				// or Obsidian's built-in == when there is none.
+				const preset = this.firstPreset('highlight');
+				this.toggleWrap(editor, preset ? preset.delimiter : '==');
+			},
+		});
+
+		this.addCommand({
+			id: 'toggle-preset',
+			name: 'Style: choose a preset and toggle its markers',
+			editorCallback: (editor) => {
+				const presets = this.settings.presets.filter(
+					(p) => p.enabled && validateDelimiter(p.delimiter) === null,
+				);
+				if (presets.length === 0) {
+					new Notice(
+						'No enabled presets. Add one in the plugin settings.',
+					);
+					return;
+				}
+				new PresetSuggestModal(this.app, presets, (p) =>
+					this.toggleWrap(editor, p.delimiter),
+				).open();
 			},
 		});
 
@@ -325,27 +396,38 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		});
 
 		this.addSettingTab(new UnderlineSpoilerSettingTab(this.app, this));
-		this.applyBodyClasses();
+		this.applyStyles();
 	}
 
 	onunload() {
 		document.body.classList.remove('ou-spoiler-hover');
-		document.body.style.removeProperty('--ou-underline-thickness');
+		this.styleEl?.remove();
+		this.styleEl = null;
 	}
 
 	async loadSettings() {
-		const data =
-			(await this.loadData()) as Partial<UnderlineSpoilerSettings> | null;
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
+		this.settings = normalizeSettings(await this.loadData());
 	}
 
+	/** Full save: markers/rules changed, so editors and previews are rebuilt. */
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.refresh();
 	}
 
-	getUnderlineDelimiter(): string {
-		return resolveUnderlineDelimiter(this.settings);
+	/** Cheap save for look-only changes (color, opacity, size, names). */
+	async saveStyles() {
+		await this.saveData(this.settings);
+		this.applyStyles();
+	}
+
+	private firstPreset(kind: PresetKind): StylePreset | undefined {
+		return this.settings.presets.find(
+			(p) =>
+				p.kind === kind &&
+				p.enabled &&
+				validateDelimiter(p.delimiter) === null,
+		);
 	}
 
 	getRules(): Rule[] {
@@ -360,11 +442,21 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 				skipTables: true,
 			});
 		}
-		if (this.settings.underlineEnabled) {
+
+		const seen = new Set<string>([SPOILER_DELIMITER]);
+		for (const p of this.settings.presets) {
+			if (
+				!p.enabled ||
+				validateDelimiter(p.delimiter) !== null ||
+				seen.has(p.delimiter)
+			)
+				continue;
+			seen.add(p.delimiter);
+			const underline = p.kind === 'underline';
 			rules.push({
-				delim: this.getUnderlineDelimiter(),
-				cls: 'ou-underline',
-				tag: 'u',
+				delim: p.delimiter,
+				cls: `${underline ? 'ou-underline' : 'ou-highlight'} ou-p-${p.id}`,
+				tag: underline ? 'u' : 'span',
 				strict: true,
 				spoiler: false,
 				skipTables: false,
@@ -373,19 +465,21 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		return rules;
 	}
 
-	private applyBodyClasses() {
+	private applyStyles() {
+		if (!this.styleEl) {
+			this.styleEl = document.head.createEl('style', {
+				attr: { id: 'ou-preset-styles' },
+			});
+		}
+		this.styleEl.textContent = buildPresetCss(this.settings);
 		document.body.classList.toggle(
 			'ou-spoiler-hover',
 			this.settings.spoilerRevealOnHover,
 		);
-		document.body.style.setProperty(
-			'--ou-underline-thickness',
-			`${this.settings.underlineThickness}px`,
-		);
 	}
 
 	private refresh() {
-		this.applyBodyClasses();
+		this.applyStyles();
 
 		this.editorExtensions.length = 0;
 		this.editorExtensions.push(buildEditorExtension(this));
