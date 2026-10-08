@@ -21,9 +21,10 @@ import {
 	StylePreset,
 	UnderlineSpoilerSettings,
 	UnderlineSpoilerSettingTab,
-	buildPresetCss,
+	buildBodyVars,
 	createDefaultSettings,
 	normalizeSettings,
+	presetVars,
 	validateDelimiter,
 } from './settings';
 
@@ -31,10 +32,20 @@ interface Rule {
 	delim: string;
 	/** One or more space-separated class names. */
 	cls: string;
+	/** CSS custom properties set on every wrapped element. */
+	vars: Record<string, string>;
+	/** Same as `vars`, as an inline style string (for editor decorations). */
+	style: string;
 	tag: 'span' | 'u';
 	strict: boolean;
 	spoiler: boolean;
 	skipTables: boolean;
+}
+
+function varsToStyle(vars: Record<string, string>): string {
+	return Object.entries(vars)
+		.map(([k, v]) => `${k}: ${v}`)
+		.join('; ');
 }
 
 function isWordChar(ch: string | undefined): boolean {
@@ -167,6 +178,7 @@ function applyDomMatches(matches: DomMatch[], rule: Rule): void {
 		range.setEnd(close.node, endIdx);
 
 		const wrapper = createEl(rule.tag, { cls: rule.cls.split(' ') });
+		wrapper.setCssProps(rule.vars);
 		if (rule.spoiler) {
 			wrapper.addEventListener('click', () =>
 				wrapper.classList.toggle('is-revealed'),
@@ -230,11 +242,14 @@ function buildDecorations(
 						(r) => r.from <= closeTo && r.to >= openFrom,
 					);
 
-					out.push(
-						Decoration.mark({
-							class: rule.cls + (touching ? ' is-revealed' : ''),
-						}).range(openTo, closeFrom),
-					);
+					const spec: {
+						class: string;
+						attributes?: Record<string, string>;
+					} = {
+						class: rule.cls + (touching ? ' is-revealed' : ''),
+					};
+					if (rule.style) spec.attributes = { style: rule.style };
+					out.push(Decoration.mark(spec).range(openTo, closeFrom));
 
 					if (live && !touching) {
 						out.push(
@@ -318,7 +333,7 @@ class PresetSuggestModal extends FuzzySuggestModal<StylePreset> {
 export default class UnderlineSpoilerPlugin extends Plugin {
 	settings: UnderlineSpoilerSettings = createDefaultSettings();
 	private editorExtensions: Extension[] = [];
-	private styleEl: HTMLStyleElement | null = null;
+	private appliedVars = new Set<string>();
 
 	async onload() {
 		await this.loadSettings();
@@ -353,8 +368,7 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 			id: 'toggle-highlight',
 			name: 'Highlighter: toggle markers around selected text',
 			editorCallback: (editor) => {
-				// Uses the first enabled highlighter preset,
-				// or Obsidian's built-in == when there is none.
+				// First enabled highlighter preset, or the built-in == when there is none.
 				const preset = this.firstPreset('highlight');
 				this.toggleWrap(editor, preset ? preset.delimiter : '==');
 			},
@@ -400,9 +414,14 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	}
 
 	onunload() {
-		document.body.classList.remove('ou-spoiler-hover');
-		this.styleEl?.remove();
-		this.styleEl = null;
+		for (const key of this.appliedVars) {
+			document.body.style.removeProperty(key);
+		}
+		this.appliedVars.clear();
+		document.body.classList.remove(
+			'ou-spoiler-hover',
+			'ou-native-highlight',
+		);
 	}
 
 	async loadSettings() {
@@ -436,6 +455,8 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 			rules.push({
 				delim: SPOILER_DELIMITER,
 				cls: 'ou-spoiler',
+				vars: {},
+				style: '',
 				tag: 'span',
 				strict: false,
 				spoiler: true,
@@ -453,9 +474,12 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 				continue;
 			seen.add(p.delimiter);
 			const underline = p.kind === 'underline';
+			const vars = presetVars(p);
 			rules.push({
 				delim: p.delimiter,
-				cls: `${underline ? 'ou-underline' : 'ou-highlight'} ou-p-${p.id}`,
+				cls: underline ? 'ou-underline' : 'ou-highlight',
+				vars,
+				style: varsToStyle(vars),
 				tag: underline ? 'u' : 'span',
 				strict: true,
 				spoiler: false,
@@ -465,16 +489,22 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		return rules;
 	}
 
+	/** Pushes colors/sizes to CSS variables on <body>; styles.css does the rest. */
 	private applyStyles() {
-		if (!this.styleEl) {
-			this.styleEl = document.head.createEl('style', {
-				attr: { id: 'ou-preset-styles' },
-			});
+		const vars = buildBodyVars(this.settings);
+		for (const key of this.appliedVars) {
+			if (!(key in vars)) document.body.style.removeProperty(key);
 		}
-		this.styleEl.textContent = buildPresetCss(this.settings);
+		document.body.setCssProps(vars);
+		this.appliedVars = new Set(Object.keys(vars));
+
 		document.body.classList.toggle(
 			'ou-spoiler-hover',
 			this.settings.spoilerRevealOnHover,
+		);
+		document.body.classList.toggle(
+			'ou-native-highlight',
+			this.settings.nativeHighlight.customize,
 		);
 	}
 

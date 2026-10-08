@@ -1,4 +1,5 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, PluginSettingTab } from 'obsidian';
+import type { SettingDefinitionItem } from 'obsidian';
 import type UnderlineSpoilerPlugin from './main';
 
 export const SPOILER_DELIMITER = '||';
@@ -247,7 +248,7 @@ export function normalizeSettings(raw: unknown): UnderlineSpoilerSettings {
 }
 
 // ---------------------------------------------------------------------------
-// CSS generation
+// Styling: values live as CSS variables on <body>; styles.css consumes them.
 // ---------------------------------------------------------------------------
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -270,41 +271,48 @@ function underlineColor(a: Appearance): string {
 	return hexToRgba(a.color, a.opacity);
 }
 
-/** Per-preset CSS variables + the override for Obsidian's built-in highlight. */
-export function buildPresetCss(s: UnderlineSpoilerSettings): string {
-	const out: string[] = [];
-
+/** Variables set on <body>: one color/size pair per preset, plus the built-in highlight. */
+export function buildBodyVars(
+	s: UnderlineSpoilerSettings,
+): Record<string, string> {
+	const out: Record<string, string> = {};
 	for (const p of s.presets) {
-		const sel = `.ou-p-${p.id}`;
-		if (p.kind === 'underline') {
-			out.push(
-				`${sel} { --ou-ul-color: ${underlineColor(p)}; --ou-ul-thickness: ${round2(p.size)}px; }`,
-			);
-		} else {
-			out.push(
-				`${sel} { --ou-hl-color: ${hexToRgba(p.color, p.opacity)}; --ou-hl-size: ${Math.round(p.size)}%; }`,
-			);
-		}
+		const underline = p.kind === 'underline';
+		out[`--ou-p-${p.id}-color`] = underline
+			? underlineColor(p)
+			: hexToRgba(p.color, p.opacity);
+		out[`--ou-p-${p.id}-size`] = underline
+			? `${round2(p.size)}px`
+			: `${Math.round(p.size)}%`;
 	}
-
 	const nh = s.nativeHighlight;
-	if (nh.customize) {
-		out.push(
-			`body mark, body .cm-highlight { ` +
-				`--ou-hl-color: ${hexToRgba(nh.color, nh.opacity)}; ` +
-				`--ou-hl-size: ${Math.round(nh.size)}%; ` +
-				`background-color: transparent; ` +
-				`background-image: linear-gradient(to top, var(--ou-hl-color) var(--ou-hl-size), transparent var(--ou-hl-size)); ` +
-				`}`,
-		);
-	}
+	out['--ou-nh-color'] = hexToRgba(nh.color, nh.opacity);
+	out['--ou-nh-size'] = `${Math.round(nh.size)}%`;
+	return out;
+}
 
-	return out.join('\n');
+/** Variables set on a wrapped element, pointing at that preset's body variables. */
+export function presetVars(p: StylePreset): Record<string, string> {
+	return {
+		'--ou-color': `var(--ou-p-${p.id}-color)`,
+		'--ou-size': `var(--ou-p-${p.id}-size)`,
+	};
 }
 
 // ---------------------------------------------------------------------------
-// Settings tab
+// Settings tab (declarative API, Obsidian 1.13+)
+//
+// Control keys:
+//   spoilerEnabled / spoilerRevealOnHover   -> top-level settings
+//   native:<field>                          -> settings.nativeHighlight
+//   p:<presetId>:<field>                    -> one entry of settings.presets
+// Opacity is stored as 0..1 but shown as a 0..100 slider.
 // ---------------------------------------------------------------------------
+
+interface ResolvedKey {
+	obj: Record<string, unknown>;
+	field: string;
+}
 
 export class UnderlineSpoilerSettingTab extends PluginSettingTab {
 	plugin: UnderlineSpoilerPlugin;
@@ -314,259 +322,287 @@ export class UnderlineSpoilerSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-
-		this.renderPresetSection(containerEl, 'underline');
-		this.renderPresetSection(containerEl, 'highlight');
-		this.renderSpoilerSection(containerEl);
-
-		new Setting(containerEl).setName('Conflict prevention').setHeading();
-		new Setting(containerEl)
-			.setName('Where markers are ignored')
-			.setDesc(
-				'Code, math, and comments are skipped. Markers must touch the text, so i++ and C++ stay unchanged.',
-			);
-	}
-
-	private renderPresetSection(el: HTMLElement, kind: PresetKind) {
-		const isUnderline = kind === 'underline';
-		new Setting(el)
-			.setName(isUnderline ? 'Underline' : 'Highlighter')
-			.setHeading();
-
-		if (!isUnderline) this.renderNativeHighlight(el);
-
-		for (const p of this.plugin.settings.presets.filter(
-			(x) => x.kind === kind,
-		)) {
-			this.renderPreset(el, p);
+	private resolveKey(key: string): ResolvedKey | null {
+		const s = this.plugin.settings;
+		if (key.startsWith('native:')) {
+			return {
+				obj: s.nativeHighlight as unknown as Record<string, unknown>,
+				field: key.slice('native:'.length),
+			};
 		}
-
-		new Setting(el).addButton((b) =>
-			b
-				.setButtonText(
-					isUnderline
-						? 'Add underline preset'
-						: 'Add highlighter preset',
-				)
-				.setCta()
-				.onClick(async () => {
-					const presets = this.plugin.settings.presets;
-					presets.push(makePreset(kind, presets));
-					await this.plugin.saveSettings();
-					this.display();
-				}),
-		);
+		if (key.startsWith('p:')) {
+			const [, id, field] = key.split(':');
+			const preset = s.presets.find((p) => p.id === id);
+			if (!preset || !field) return null;
+			return {
+				obj: preset as unknown as Record<string, unknown>,
+				field,
+			};
+		}
+		return { obj: s as unknown as Record<string, unknown>, field: key };
 	}
 
-	private renderNativeHighlight(el: HTMLElement) {
-		const nh = this.plugin.settings.nativeHighlight;
-		const card = el.createDiv({ cls: 'ou-preset' });
-		const details: Setting[] = [];
-
-		new Setting(card)
-			.setName('Built-in highlighter')
-			.setDesc(
-				"Customize the look of ==text== (Obsidian's own highlight).",
-			)
-			.addToggle((t) =>
-				t.setValue(nh.customize).onChange(async (v) => {
-					nh.customize = v;
-					for (const d of details) d.settingEl.toggle(v);
-					await this.plugin.saveStyles();
-				}),
-			);
-
-		details.push(...this.addAppearance(card, nh, 'highlight'));
-
-		const preview = new Setting(card).setName('Preview');
-		preview.controlEl.createEl('mark', { text: 'Sample text' });
-		details.push(preview);
-
-		for (const d of details) d.settingEl.toggle(nh.customize);
+	getControlValue(key: string): unknown {
+		const r = this.resolveKey(key);
+		if (!r) return undefined;
+		const v = r.obj[r.field];
+		return r.field === 'opacity' && typeof v === 'number'
+			? Math.round(v * 100)
+			: v;
 	}
 
-	private renderPreset(el: HTMLElement, p: StylePreset) {
-		const card = el.createDiv({ cls: 'ou-preset' });
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		const r = this.resolveKey(key);
+		if (!r) return;
+		r.obj[r.field] =
+			r.field === 'opacity' && typeof value === 'number'
+				? value / 100
+				: value;
 
-		new Setting(card)
-			.setName('Preset')
-			.addText((t) =>
-				t
-					.setPlaceholder('Name')
-					.setValue(p.name)
-					.onChange(async (v) => {
-						p.name = v;
-						await this.plugin.saveStyles();
-					}),
-			)
-			.addToggle((t) =>
-				t
-					.setTooltip('Enabled')
-					.setValue(p.enabled)
-					.onChange(async (v) => {
-						p.enabled = v;
-						await this.plugin.saveSettings();
-					}),
-			)
-			.addExtraButton((b) =>
-				b
-					.setIcon('trash')
-					.setTooltip('Delete preset')
-					.onClick(async () => {
-						const presets = this.plugin.settings.presets;
-						const i = presets.indexOf(p);
-						if (i !== -1) presets.splice(i, 1);
-						await this.plugin.saveSettings();
-						this.display();
-					}),
-			);
+		// Markers or on/off state changed: rebuild editors and previews.
+		// Everything else is a look-only change and just updates CSS variables.
+		if (
+			r.field === 'delimiter' ||
+			r.field === 'enabled' ||
+			r.field === 'spoilerEnabled'
+		) {
+			await this.plugin.saveSettings();
+		} else {
+			await this.plugin.saveStyles();
+		}
+	}
 
-		const delim = new Setting(card)
-			.setName('Marker')
-			.setDesc(
-				'2-3 characters, no letters, digits, spaces, or Markdown syntax characters.',
-			);
-		const err = delim.descEl.createDiv({ cls: 'ou-setting-error' });
-		delim.addText((t) =>
-			t
-				.setPlaceholder('++')
-				.setValue(p.delimiter)
-				.onChange(async (v) => {
-					const msg = validatePresetDelimiter(
-						v,
-						this.plugin.settings.presets,
-						p.id,
-					);
-					err.setText(msg ?? '');
-					if (msg) return;
-					p.delimiter = v;
-					await this.plugin.saveSettings();
-				}),
-		);
+	private async addPreset(kind: PresetKind): Promise<void> {
+		const presets = this.plugin.settings.presets;
+		presets.push(makePreset(kind, presets));
+		await this.plugin.saveSettings();
+		this.update();
+	}
 
-		this.addAppearance(card, p, p.kind);
+	private async deletePreset(id: string): Promise<void> {
+		const presets = this.plugin.settings.presets;
+		const i = presets.findIndex((p) => p.id === id);
+		if (i !== -1) presets.splice(i, 1);
+		await this.plugin.saveSettings();
+		this.update();
+	}
 
-		const preview = new Setting(card).setName('Preview');
-		preview.controlEl.createEl('span', {
-			text: 'Sample text',
-			cls: [
-				p.kind === 'underline' ? 'ou-underline' : 'ou-highlight',
-				`ou-p-${p.id}`,
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		const defs: SettingDefinitionItem[] = [];
+		const settings = this.plugin.settings;
+
+		const pushPresets = (kind: PresetKind) => {
+			for (const p of settings.presets) {
+				if (p.kind !== kind) continue;
+				const underline = kind === 'underline';
+				const k = (field: string) => `p:${p.id}:${field}`;
+
+				defs.push({
+					type: 'group',
+					heading: `${underline ? 'Underline' : 'Highlighter'}: ${p.name || 'Untitled'}`,
+					items: [
+						{
+							name: 'Name',
+							control: {
+								type: 'text',
+								key: k('name'),
+								placeholder: 'Preset name',
+							},
+						},
+						{
+							name: 'Enabled',
+							control: { type: 'toggle', key: k('enabled') },
+						},
+						{
+							name: 'Marker',
+							desc: '2-3 characters, no letters, digits, spaces, or Markdown syntax characters.',
+							control: {
+								type: 'text',
+								key: k('delimiter'),
+								placeholder: '++',
+								validate: (value: string) =>
+									validatePresetDelimiter(
+										value,
+										this.plugin.settings.presets,
+										p.id,
+									) ?? undefined,
+							},
+						},
+						{
+							name: 'Use text color',
+							desc: 'The underline takes the color of the text.',
+							visible: () => underline,
+							control: {
+								type: 'toggle',
+								key: k('useTextColor'),
+							},
+						},
+						{
+							name: 'Color',
+							visible: () => !(underline && p.useTextColor),
+							control: { type: 'color', key: k('color') },
+						},
+						{
+							name: 'Opacity',
+							desc: '100% is solid, 0% is invisible.',
+							control: {
+								type: 'slider',
+								key: k('opacity'),
+								min: 0,
+								max: 100,
+								step: 5,
+							},
+						},
+						{
+							name: 'Thickness',
+							desc: 'Thickness of the underline in pixels.',
+							visible: () => underline,
+							control: {
+								type: 'slider',
+								key: k('size'),
+								min: 0.5,
+								max: 8,
+								step: 0.5,
+							},
+						},
+						{
+							name: 'Marker height',
+							desc: 'How much of the line height the marker covers (%).',
+							visible: () => !underline,
+							control: {
+								type: 'slider',
+								key: k('size'),
+								min: 10,
+								max: 100,
+								step: 5,
+							},
+						},
+						{
+							name: 'Preview',
+							render: (setting) => {
+								const el = setting.controlEl.createEl('span', {
+									text: 'Sample text',
+									cls: underline
+										? 'ou-underline'
+										: 'ou-highlight',
+								});
+								el.setCssProps(presetVars(p));
+							},
+						},
+						{
+							name: 'Delete preset',
+							desc: 'Removes this preset and its marker.',
+							action: () => {
+								void this.deletePreset(p.id);
+							},
+						},
+					],
+				});
+			}
+		};
+
+		// Underline
+		pushPresets('underline');
+		defs.push({
+			name: 'Add underline preset',
+			action: () => {
+				void this.addPreset('underline');
+			},
+		});
+
+		// Highlighter: built-in ==text== first, then custom presets
+		defs.push({
+			type: 'group',
+			heading: 'Highlighter: built-in',
+			items: [
+				{
+					name: 'Customize built-in highlighter',
+					desc: "Style Obsidian's own ==text== highlight.",
+					control: { type: 'toggle', key: 'native:customize' },
+				},
+				{
+					name: 'Color',
+					visible: () =>
+						this.plugin.settings.nativeHighlight.customize,
+					control: { type: 'color', key: 'native:color' },
+				},
+				{
+					name: 'Opacity',
+					desc: '100% is solid, 0% is invisible.',
+					visible: () =>
+						this.plugin.settings.nativeHighlight.customize,
+					control: {
+						type: 'slider',
+						key: 'native:opacity',
+						min: 0,
+						max: 100,
+						step: 5,
+					},
+				},
+				{
+					name: 'Marker height',
+					desc: 'How much of the line height the marker covers (%).',
+					visible: () =>
+						this.plugin.settings.nativeHighlight.customize,
+					control: {
+						type: 'slider',
+						key: 'native:size',
+						min: 10,
+						max: 100,
+						step: 5,
+					},
+				},
+				{
+					name: 'Preview',
+					visible: () =>
+						this.plugin.settings.nativeHighlight.customize,
+					render: (setting) => {
+						setting.controlEl.createEl('mark', {
+							text: 'Sample text',
+						});
+					},
+				},
 			],
 		});
-	}
+		pushPresets('highlight');
+		defs.push({
+			name: 'Add highlighter preset',
+			action: () => {
+				void this.addPreset('highlight');
+			},
+		});
 
-	/** Color / opacity / size controls. Returns the created rows. */
-	private addAppearance(
-		parent: HTMLElement,
-		a: Appearance,
-		kind: PresetKind,
-	): Setting[] {
-		const rows: Setting[] = [];
-		const isUnderline = kind === 'underline';
-		let colorRow: Setting | null = null;
+		// Spoiler
+		defs.push({
+			type: 'group',
+			heading: 'Spoiler',
+			items: [
+				{
+					name: 'Enable spoiler',
+					desc: `Text wrapped in ${SPOILER_DELIMITER} is hidden until clicked. Not applied inside tables.`,
+					control: { type: 'toggle', key: 'spoilerEnabled' },
+				},
+				{
+					name: 'Reveal on mouse hover',
+					desc: 'Desktop only: also reveal spoilers on hover.',
+					visible: () => this.plugin.settings.spoilerEnabled,
+					control: { type: 'toggle', key: 'spoilerRevealOnHover' },
+				},
+			],
+		});
 
-		if (isUnderline) {
-			rows.push(
-				new Setting(parent)
-					.setName('Use text color')
-					.setDesc('The underline takes the color of the text.')
-					.addToggle((t) =>
-						t
-							.setValue(a.useTextColor ?? false)
-							.onChange(async (v) => {
-								a.useTextColor = v;
-								colorRow?.settingEl.toggle(!v);
-								await this.plugin.saveStyles();
-							}),
-					),
-			);
-		}
+		// Conflict prevention
+		defs.push({
+			type: 'group',
+			heading: 'Conflict prevention',
+			items: [
+				{
+					name: 'Where markers are ignored',
+					desc: 'Code, math, and comments are skipped. Markers must touch the text, so i++ and C++ stay unchanged.',
+				},
+			],
+		});
 
-		colorRow = new Setting(parent).setName('Color').addColorPicker((c) =>
-			c.setValue(a.color).onChange(async (v) => {
-				a.color = v;
-				await this.plugin.saveStyles();
-			}),
-		);
-		colorRow.settingEl.toggle(!(isUnderline && a.useTextColor));
-		rows.push(colorRow);
-
-		rows.push(
-			new Setting(parent)
-				.setName('Opacity')
-				.setDesc('100% is solid, 0% is invisible.')
-				.addSlider((s) =>
-					s
-						.setLimits(0, 100, 5)
-						.setValue(Math.round(a.opacity * 100))
-						.setDynamicTooltip()
-						.onChange(async (v) => {
-							a.opacity = v / 100;
-							await this.plugin.saveStyles();
-						}),
-				),
-		);
-
-		rows.push(
-			new Setting(parent)
-				.setName(isUnderline ? 'Thickness' : 'Marker height')
-				.setDesc(
-					isUnderline
-						? 'Thickness of the underline in pixels.'
-						: 'How much of the line height the marker covers (%).',
-				)
-				.addSlider((s) =>
-					(isUnderline
-						? s.setLimits(0.5, 8, 0.5)
-						: s.setLimits(10, 100, 5)
-					)
-						.setValue(a.size)
-						.setDynamicTooltip()
-						.onChange(async (v) => {
-							a.size = v;
-							await this.plugin.saveStyles();
-						}),
-				),
-		);
-
-		return rows;
-	}
-
-	private renderSpoilerSection(el: HTMLElement) {
-		new Setting(el).setName('Spoiler').setHeading();
-
-		let hoverRow: Setting | null = null;
-
-		new Setting(el)
-			.setName('Enable spoiler')
-			.setDesc(
-				`Text wrapped in ${SPOILER_DELIMITER} is hidden until clicked. Not applied inside tables.`,
-			)
-			.addToggle((t) =>
-				t
-					.setValue(this.plugin.settings.spoilerEnabled)
-					.onChange(async (v) => {
-						this.plugin.settings.spoilerEnabled = v;
-						hoverRow?.settingEl.toggle(v);
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		hoverRow = new Setting(el)
-			.setName('Reveal on mouse hover')
-			.setDesc('Desktop only: also reveal spoilers on hover.')
-			.addToggle((t) =>
-				t
-					.setValue(this.plugin.settings.spoilerRevealOnHover)
-					.onChange(async (v) => {
-						this.plugin.settings.spoilerRevealOnHover = v;
-						await this.plugin.saveStyles();
-					}),
-			);
-		hoverRow.settingEl.toggle(this.plugin.settings.spoilerEnabled);
+		return defs;
 	}
 }
