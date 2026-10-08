@@ -12,6 +12,8 @@ Underline, highlighter and spoiler formatting for Obsidian using simple text mar
 
 - **Presets:** create as many underline and highlighter presets as you like. Each has its own marker, color, opacity, and thickness (underline) or marker height (highlighter).
 - **Built-in highlight:** restyle Obsidian's `==text==` with your own color, opacity, and height.
+- **Bold text:** set your own color and weight for `**bold**`.
+- **Image alignment:** images are centered; add `#left` or `#right` to the link (`![[photo.png#left]]`) to align one to a side.
 - **Spoilers:** click to reveal, with optional reveal on hover (desktop).
 - **Works everywhere:** Reading mode, Live Preview, and Source mode.
 - **Commands:** toggle underline, highlighter, spoiler, or any preset around the selected text. Bind them to hotkeys or a mobile toolbar.

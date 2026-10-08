@@ -31,9 +31,19 @@ export interface NativeHighlightSettings extends Appearance {
 	customize: boolean;
 }
 
+export interface BoldSettings {
+	customize: boolean;
+	/** Hex color, e.g. #ffe600 */
+	color: string;
+	/** font-weight, 100..900 */
+	weight: number;
+}
+
 export interface UnderlineSpoilerSettings {
 	presets: StylePreset[];
 	nativeHighlight: NativeHighlightSettings;
+	bold: BoldSettings;
+	imageAlign: boolean;
 	spoilerEnabled: boolean;
 	spoilerRevealOnHover: boolean;
 }
@@ -126,6 +136,8 @@ export function createDefaultSettings(): UnderlineSpoilerSettings {
 			opacity: 0.4,
 			size: 100,
 		},
+		bold: { customize: false, color: '#ffe600', weight: 900 },
+		imageAlign: false,
 		spoilerEnabled: true,
 		spoilerRevealOnHover: false,
 	};
@@ -244,6 +256,24 @@ export function normalizeSettings(raw: unknown): UnderlineSpoilerSettings {
 		};
 	}
 
+	const b = data.bold;
+	if (typeof b === 'object' && b !== null) {
+		const r = b as Record<string, unknown>;
+		const d = s.bold;
+		s.bold = {
+			customize:
+				typeof r.customize === 'boolean' ? r.customize : d.customize,
+			color:
+				typeof r.color === 'string' && HEX_RE.test(r.color)
+					? r.color
+					: d.color,
+			weight: clampNum(r.weight, 100, 900, d.weight),
+		};
+	}
+	if (typeof data.imageAlign === 'boolean') {
+		s.imageAlign = data.imageAlign;
+	}
+
 	return s;
 }
 
@@ -288,6 +318,11 @@ export function buildBodyVars(
 	const nh = s.nativeHighlight;
 	out['--ou-nh-color'] = hexToRgba(nh.color, nh.opacity);
 	out['--ou-nh-size'] = `${Math.round(nh.size)}%`;
+	if (s.bold.customize) {
+		// Obsidian's own theme variables for bold text.
+		out['--bold-weight'] = String(Math.round(s.bold.weight));
+		out['--bold-color'] = s.bold.color;
+	}
 	return out;
 }
 
@@ -328,6 +363,12 @@ export class UnderlineSpoilerSettingTab extends PluginSettingTab {
 			return {
 				obj: s.nativeHighlight as unknown as Record<string, unknown>,
 				field: key.slice('native:'.length),
+			};
+		}
+		if (key.startsWith('bold:')) {
+			return {
+				obj: s.bold as unknown as Record<string, unknown>,
+				field: key.slice('bold:'.length),
 			};
 		}
 		if (key.startsWith('p:')) {
@@ -570,6 +611,63 @@ export class UnderlineSpoilerSettingTab extends PluginSettingTab {
 			action: () => {
 				void this.addPreset('highlight');
 			},
+		});
+
+		// Bold
+		defs.push({
+			type: 'group',
+			heading: 'Bold',
+			items: [
+				{
+					name: 'Customize bold text',
+					desc: 'Give **text** your own color and weight.',
+					control: { type: 'toggle', key: 'bold:customize' },
+				},
+				{
+					name: 'Color',
+					visible: () => this.plugin.settings.bold.customize,
+					control: { type: 'color', key: 'bold:color' },
+				},
+				{
+					name: 'Weight',
+					desc: '100 is thin, 900 is the heaviest.',
+					visible: () => this.plugin.settings.bold.customize,
+					control: {
+						type: 'slider',
+						key: 'bold:weight',
+						min: 100,
+						max: 900,
+						step: 100,
+					},
+				},
+				{
+					name: 'Preview',
+					visible: () => this.plugin.settings.bold.customize,
+					render: (setting) => {
+						setting.controlEl.createEl('strong', {
+							text: 'Sample text',
+						});
+					},
+				},
+			],
+		});
+
+		// Images
+		defs.push({
+			type: 'group',
+			heading: 'Images',
+			items: [
+				{
+					name: 'Image alignment',
+					desc: 'Center images by default and align single images to the left or right.',
+					control: { type: 'toggle', key: 'imageAlign' },
+				},
+				{
+					name: 'How to use',
+					desc: 'Add #left or #right after the file name, for example ![[photo.png#left]]. Images without it stay centered.',
+					visible: () => this.plugin.settings.imageAlign,
+				},
+			],
 		});
 
 		// Spoiler

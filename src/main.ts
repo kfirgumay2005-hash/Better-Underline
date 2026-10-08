@@ -421,6 +421,8 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		document.body.classList.remove(
 			'ou-spoiler-hover',
 			'ou-native-highlight',
+			'ou-custom-bold',
+			'ou-image-align',
 		);
 	}
 
@@ -505,6 +507,14 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		document.body.classList.toggle(
 			'ou-native-highlight',
 			this.settings.nativeHighlight.customize,
+		);
+		document.body.classList.toggle(
+			'ou-custom-bold',
+			this.settings.bold.customize,
+		);
+		document.body.classList.toggle(
+			'ou-image-align',
+			this.settings.imageAlign,
 		);
 	}
 
