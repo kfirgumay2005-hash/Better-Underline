@@ -336,9 +336,7 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	private appliedVars = new Set<string>();
 
 	async onload() {
-		// Commands are registered first and synchronously, before any `await`,
-		// so they already exist when Obsidian resolves the mobile toolbar.
-		// They read the settings lazily, only when they run.
+		// Commands read the settings lazily, only when they run.
 		this.registerCommands();
 
 		await this.loadSettings();
@@ -356,20 +354,33 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		this.applyStyles();
 	}
 
+	/**
+	 * Runs an action on the active Markdown editor.
+	 * Commands use a plain `callback` and look up the editor themselves,
+	 * which is what the mobile toolbar can run.
+	 */
+	private runOnEditor(action: (editor: Editor) => void) {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view) action(view.editor);
+		else new Notice('Please open a file first.');
+	}
+
 	private registerCommands() {
 		this.addCommand({
 			id: 'toggle-underline',
 			name: 'Underline: toggle markers around selected text',
 			icon: 'underline',
-			editorCallback: (editor) => {
-				const preset = this.firstPreset('underline');
-				if (!preset) {
-					new Notice(
-						'No enabled underline preset. Add one in the plugin settings.',
-					);
-					return;
-				}
-				this.toggleWrap(editor, preset.delimiter);
+			callback: () => {
+				this.runOnEditor((editor) => {
+					const preset = this.firstPreset('underline');
+					if (!preset) {
+						new Notice(
+							'No enabled underline preset. Add one in the plugin settings.',
+						);
+						return;
+					}
+					this.toggleWrap(editor, preset.delimiter);
+				});
 			},
 		});
 
@@ -377,10 +388,12 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 			id: 'toggle-highlight',
 			name: 'Highlighter: toggle markers around selected text',
 			icon: 'highlighter',
-			editorCallback: (editor) => {
-				// First enabled highlighter preset, or the built-in == when there is none.
-				const preset = this.firstPreset('highlight');
-				this.toggleWrap(editor, preset ? preset.delimiter : '==');
+			callback: () => {
+				this.runOnEditor((editor) => {
+					// First enabled highlighter preset, or the built-in == when there is none.
+					const preset = this.firstPreset('highlight');
+					this.toggleWrap(editor, preset ? preset.delimiter : '==');
+				});
 			},
 		});
 
@@ -388,19 +401,23 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 			id: 'toggle-preset',
 			name: 'Style: choose a preset and toggle its markers',
 			icon: 'palette',
-			editorCallback: (editor) => {
-				const presets = this.settings.presets.filter(
-					(p) => p.enabled && validateDelimiter(p.delimiter) === null,
-				);
-				if (presets.length === 0) {
-					new Notice(
-						'No enabled presets. Add one in the plugin settings.',
+			callback: () => {
+				this.runOnEditor((editor) => {
+					const presets = this.settings.presets.filter(
+						(p) =>
+							p.enabled &&
+							validateDelimiter(p.delimiter) === null,
 					);
-					return;
-				}
-				new PresetSuggestModal(this.app, presets, (p) =>
-					this.toggleWrap(editor, p.delimiter),
-				).open();
+					if (presets.length === 0) {
+						new Notice(
+							'No enabled presets. Add one in the plugin settings.',
+						);
+						return;
+					}
+					new PresetSuggestModal(this.app, presets, (p) =>
+						this.toggleWrap(editor, p.delimiter),
+					).open();
+				});
 			},
 		});
 
@@ -408,12 +425,16 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 			id: 'toggle-spoiler',
 			name: 'Spoiler: toggle markers around selected text',
 			icon: 'eye-off',
-			editorCallback: (editor) => {
-				if (!this.settings.spoilerEnabled) {
-					new Notice('Spoiler is disabled in the plugin settings.');
-					return;
-				}
-				this.toggleWrap(editor, SPOILER_DELIMITER);
+			callback: () => {
+				this.runOnEditor((editor) => {
+					if (!this.settings.spoilerEnabled) {
+						new Notice(
+							'Spoiler is disabled in the plugin settings.',
+						);
+						return;
+					}
+					this.toggleWrap(editor, SPOILER_DELIMITER);
+				});
 			},
 		});
 	}
