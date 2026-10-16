@@ -358,11 +358,15 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	 * Runs an action on the active Markdown editor.
 	 * Commands use a plain `callback` and look up the editor themselves,
 	 * which is what the mobile toolbar can run.
+	 * `activeEditor` also covers embedded editors, such as a canvas card
+	 * being edited, where the active view is not a MarkdownView.
 	 */
 	private runOnEditor(action: (editor: Editor) => void) {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view) action(view.editor);
-		else new Notice('Please open a file first.');
+		const editor =
+			this.app.workspace.activeEditor?.editor ??
+			this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+		if (editor) action(editor);
+		else new Notice('Click into a note or a canvas card first.');
 	}
 
 	private registerCommands() {
