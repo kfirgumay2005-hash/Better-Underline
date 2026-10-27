@@ -1,6 +1,5 @@
 import {
 	App,
-	Editor,
 	FuzzySuggestModal,
 	MarkdownView,
 	Notice,
@@ -27,6 +26,7 @@ import {
 	presetVars,
 	validateDelimiter,
 } from './settings';
+import { TextEditor, TextTargetFinder } from './text-target';
 
 interface Rule {
 	delim: string;
@@ -334,9 +334,11 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	settings: UnderlineSpoilerSettings = createDefaultSettings();
 	private editorExtensions: Extension[] = [];
 	private appliedVars = new Set<string>();
+	private textTargets: TextTargetFinder | null = null;
 
 	async onload() {
 		// Commands read the settings lazily, only when they run.
+		this.textTargets = new TextTargetFinder(this.app, this);
 		this.registerCommands();
 
 		await this.loadSettings();
@@ -355,18 +357,15 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	}
 
 	/**
-	 * Runs an action on the active Markdown editor.
+	 * Runs an action on the text the user is working in.
 	 * Commands use a plain `callback` and look up the editor themselves,
-	 * which is what the mobile toolbar can run.
-	 * `activeEditor` also covers embedded editors, such as a canvas card
-	 * being edited, where the active view is not a MarkdownView.
+	 * which is what the mobile toolbar can run. Besides notes and canvas
+	 * cards, this finds text boxes other plugins draw (see text-target.ts).
 	 */
-	private runOnEditor(action: (editor: Editor) => void) {
-		const editor =
-			this.app.workspace.activeEditor?.editor ??
-			this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+	private runOnEditor(action: (editor: TextEditor) => void) {
+		const editor = this.textTargets?.find();
 		if (editor) action(editor);
-		else new Notice('Click into a note or a canvas card first.');
+		else new Notice('Click into a note or a text box first.');
 	}
 
 	private registerCommands() {
@@ -562,7 +561,7 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 		});
 	}
 
-	private wrapSelection(editor: Editor, d: string) {
+	private wrapSelection(editor: TextEditor, d: string) {
 		const sel = editor.getSelection();
 		if (sel) {
 			editor.replaceSelection(d + sel + d);
@@ -592,7 +591,7 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	}
 
 	private unwrapPair(
-		editor: Editor,
+		editor: TextEditor,
 		line: number,
 		pair: { open: number; close: number },
 		len: number,
@@ -635,7 +634,7 @@ export default class UnderlineSpoilerPlugin extends Plugin {
 	 * are found on their own: the cursor can be anywhere inside the marked
 	 * text, or the selection can cover just the text (markers not selected).
 	 */
-	private toggleWrap(editor: Editor, d: string) {
+	private toggleWrap(editor: TextEditor, d: string) {
 		const len = d.length;
 		const from = editor.getCursor('from');
 		const to = editor.getCursor('to');
